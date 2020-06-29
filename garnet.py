@@ -227,15 +227,14 @@ if __name__ == "__main__":
     torch.manual_seed(1234)
     num_states = 500
     num_actions = 5
-    seq_len = 200000
+    seq_len = 250000
     df = 0.9
     learning_rate = 0.005
     M = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700]
-    #M = [1]
     env = Garnet(num_states, num_actions, b_factor=100)
     
-    """ for m in M:
-        train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=False) """
     evaluate(num_states, num_actions, M, df, env, path="proj")
-    #evaluate(num_states, num_actions, M, df, env, path="proj and avg")
+    evaluate(num_states, num_actions, M, df, env, path="proj and avg")
     
+"""     for m in M:
+        train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=True) """

@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 class Garnet:
     def __init__(self, num_states=10, num_actions=5, b_factor=2):
@@ -69,7 +69,8 @@ def monte_carlo(epoch, seq_len, df, env, V_bel):
     return mse_mc
 
 
-def TD(epoch, seq_len, df, alpha, env, V_bel):
+def TD(epoch, seq_len, df, alpha, env):
+    V_bel = V_bellman()
     env.state = 0
     mse_td = []  # mean square error in every epoch
     V_td = np.random.rand(env.num_states)  # initialize the V(s) randomly
@@ -84,7 +85,8 @@ def TD(epoch, seq_len, df, alpha, env, V_bel):
     return mse_td
 
 
-def TD_linear(epoch, seq_len, df, alpha, env, dim, V_bel):
+def TD_linear(epoch, seq_len, df, alpha, env, dim):
+    V_bel = V_bellman(env)
     env.state = 0
     mse_td_linear = []  # mean square error in every epoch
     W = np.random.rand(dim)
@@ -103,7 +105,7 @@ def TD_linear(epoch, seq_len, df, alpha, env, dim, V_bel):
     return mse_td_linear
 
 
-def TD_neural(seq_len, df, learning_rate, env, net, averaging=True):
+def TD_neural(seq_len, df, learning_rate, env, net, averaging=True, B=1000):
     # only one epoch
     env.state = 0
     running_loss = 0
@@ -138,16 +140,16 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=True):
         optimizer.step()
 
         for _ in range(10000):
-            # projection : argmin(L2 matrix norm)
+            # minimize ||W-bar/W(t+1)||
             optimizer_proj.zero_grad()
-            loss_proj = torch.norm(w - net.wr.weight.data.detach())
-            loss_norm = loss_proj + 0.05 * torch.norm(w - net.w0)  # soft constraints
-            loss_norm.backward()
+            loss_proj = torch.norm(w - net.wr.weight.data.detach(), p="fro")
+            loss_proj.backward()
             optimizer_proj.step()
             if loss_proj <= 0.001:
                 break
 
         # projection 
+        w.clamp(max=B)
         net.wr.weight.data = w.data.detach()  # data attribute does not affect the computational graph
 
         # averaging
@@ -195,13 +197,19 @@ def train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging
     TD_neural(seq_len, df, learning_rate, env, net, averaging)
     print("finish")
 
+def V_bellman(env):
+    # calculate V(s) of bellman equation
+    R_ = np.sum(env.reward * 1 / env.num_actions, axis=1)
+    P_ = np.sum(env.P * 1 / env.num_actions, axis=1)
+    V_bel = np.linalg.inv((np.identity(env.num_states) - df * P_)).dot(R_)
+    return V_bel
+
 def evaluate(num_states, num_actions, M, df, env, path):
     # V(s) of bellman equation
-    R_ = np.sum(env.reward * 1 / num_actions, axis=1)
-    P_ = np.sum(env.P * 1 / num_actions, axis=1)
-    V_bel = np.linalg.inv((np.identity(num_states) - df * P_)).dot(R_)
+    V_bel = V_bellman(env)
 
     mse = []
+    mse_linear = []
     for m in M:
         # load weights
         net = Net(num_states, m)
@@ -213,28 +221,30 @@ def evaluate(num_states, num_actions, M, df, env, path):
             V_neural = net(all_s).squeeze().numpy()
         
         assert V_bel.shape == V_neural.shape
-        print(((V_bel - V_neural) ** 2).mean())
         mse.append(((V_bel - V_neural) ** 2).mean())
+        #mse_linear.append(TD_linear(epoch, seq_len, df, alpha, env, m))
 
-    plt.plot(M, mse)
+    plt.plot(M, mse, label='Neural')
+    #plt.plot(M, mse_linear, label='Linear')
     plt.title("MSE of the value function")
     plt.ylabel("Mean Square Error")
     plt.xlabel("m")
     plt.show() 
 
 if __name__ == "__main__":
-    np.random.seed(1234)
-    torch.manual_seed(1234)
+    np.random.seed(4321)
+    torch.manual_seed(4321)
+    epoch=1
+    alpha = 0.0005
     num_states = 500
     num_actions = 5
-    seq_len = 250000
+    seq_len = 350000
     df = 0.9
     learning_rate = 0.005
     M = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700]
+    #M = [400, 500]
     env = Garnet(num_states, num_actions, b_factor=100)
-    
+    """ for m in M:
+        train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=False) """
+
     evaluate(num_states, num_actions, M, df, env, path="proj")
-    evaluate(num_states, num_actions, M, df, env, path="proj and avg")
-    
-"""     for m in M:
-        train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=True) """

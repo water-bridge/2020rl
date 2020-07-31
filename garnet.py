@@ -70,7 +70,7 @@ def monte_carlo(epoch, seq_len, df, env, V_bel):
 
 
 def TD(epoch, seq_len, df, alpha, env):
-    V_bel = V_bellman()
+    V_bel = V_bellman(env)
     env.state = 0
     mse_td = []  # mean square error in every epoch
     V_td = np.random.rand(env.num_states)  # initialize the V(s) randomly
@@ -105,14 +105,145 @@ def TD_linear(epoch, seq_len, df, alpha, env, dim):
     return mse_td_linear
 
 
-def TD_neural(seq_len, df, learning_rate, env, net, averaging=True, B=1000):
+def TD_linear_off_note(epoch, seq_len, df, alpha, env, dim):
+    V_bel = V_bellman(env)
+    env.state = 0
+    mse_td_linear = []  # mean square error in every epoch
+    W = np.random.rand(dim)
+    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    
+    for _ in range(epoch):
+        s = 0
+        for t in range(seq_len):
+            a = np.random.choice(np.arange(env.num_actions))
+            r, next_s = env.step(a)
+            pi_t = a / np.sum(range(env.num_actions + 1)) # target policy
+            pi_b = 1 / env.num_actions # behavioral policy
+            p = pi_t / pi_b 
+            W += alpha * (p * features[s] * (r + df * np.dot(features[next_s].T, W)) 
+                -  features[s] * np.dot(features[s].T, W)) 
+            s = next_s
+
+            if t % 9999 == 0:
+                print('progressing')
+
+        mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
+    return mse_td_linear
+
+def TD_linear_off_book(epoch, seq_len, df, alpha, env, dim):
+    V_bel = V_bellman(env)
+    env.state = 0
+    mse_td_linear = []  # mean square error in every epoch
+    W = np.random.rand(dim)
+    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    
+    for _ in range(epoch):
+        s = 0
+        for t in range(seq_len):
+            a = np.random.choice(np.arange(env.num_actions))
+            r, next_s = env.step(a)
+            pi_t = a / np.sum(range(env.num_actions + 1)) # target policy
+            pi_b = 1 / env.num_actions # behavioral policy
+            p = pi_t / pi_b 
+            W += alpha * p * ( features[s] * (r + df * np.dot(features[next_s].T, W)) 
+                -  features[s] * np.dot(features[s].T, W)) 
+            s = next_s
+
+            if t % 9999 == 0:
+                print('progressing')
+
+        mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
+    return mse_td_linear
+
+def TDC(epoch, seq_len, df, alpha, env, dim, beta):
+    # TD with gradient correction
+    V_bel = V_bellman(env)
+    env.state = 0
+    mse_td_linear = []  # mean square error in every epoch
+    theta = np.random.rand(dim)
+    W = np.random.rand(dim)
+    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    pi_b = 1 / env.num_actions # behavioral policy
+    
+    for _ in range(epoch):
+        s = 0
+        for t in range(seq_len):
+            a = np.random.choice(np.arange(env.num_actions))
+            r, next_s = env.step(a)
+            pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
+            p = pi_t / pi_b
+            TD_error = r + df * np.dot(theta.T, features[next_s]) - np.dot(theta.T, features[s])
+            theta += alpha * p * (TD_error * features[s] -  df * features[next_s] * np.dot(features[s].T, W))
+            W += beta * p * (TD_error - np.dot(features[s].T, W)) * features[s]
+            s = next_s
+        print(((V_bel - np.dot(features, theta)) ** 2).mean())
+        mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
+    return mse_td_linear
+
+def GTD_note(epoch, seq_len, df, alpha, env, dim, beta):
+    V_bel = V_bellman(env)
+    env.state = 0
+    mse_td_linear = []  # mean square error in every epoch
+    theta = np.random.rand(dim)
+    W = np.random.rand(dim)
+    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    pi_b = 1 / env.num_actions # behavioral policy
+    
+    for _ in range(epoch):
+        s = 0
+        for t in range(seq_len):
+            a = np.random.choice(np.arange(env.num_actions))
+            r, next_s = env.step(a)
+            pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
+            p = pi_t / pi_b
+            W += + beta * (features[s] * np.dot(features[s].T, theta) - W
+                - features[s] * (df * np.dot(features[next_s].T, theta) + r))
+            theta -= alpha * (features[s] * np.dot(features[s].T, W) 
+                - df * features[next_s] * np.dot(features[s].T, W))
+            s = next_s
+        print(((V_bel - np.dot(features, theta)) ** 2).mean())
+        mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
+    return mse_td_linear
+
+def GTD0(epoch, seq_len, df, alpha, env, dim, beta):
+    V_bel = V_bellman(env)
+    env.state = 0
+    mse_td_linear = []  # mean square error in every epoch
+    theta = np.random.rand(dim)
+    W = np.random.rand(dim)
+    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    pi_b = 1 / env.num_actions # behavioral policy
+    
+    for _ in range(epoch):
+        s = 0
+        for t in range(seq_len):
+            a = np.random.choice(np.arange(env.num_actions))
+            r, next_s = env.step(a)
+            pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
+            p = pi_t / pi_b
+            W += + beta * (features[s] * (r + df * np.dot(features[next_s].T, theta)) 
+                - features[s] * np.dot(features[s].T, theta) - W)
+            theta -= alpha * (df * features[next_s] * np.dot(features[s].T, W) 
+                - features[s] * np.dot(features[s].T, W))
+            s = next_s
+        print(((V_bel - np.dot(features, theta)) ** 2).mean())
+        mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
+    return mse_td_linear
+
+def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=False, B=1000):
     # only one epoch
     env.state = 0
     running_loss = 0
-    if averaging:
-        path = "proj and avg"
+    # initialize saving path
+    if averaging and off_policy:
+        path = "avg and off"
+    elif averaging:
+        path = "avg"
+    elif off_policy:
+        path = "off_policy"
     else:
         path = "proj"
+
     # initialize parameters
     s = torch.zeros(env.num_states)
     s[0] = 1
@@ -120,7 +251,9 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=True, B=1000):
     w_ = net.w0.detach().clone()  # barW for averaging
 
     # initialize optimizer and logger
-    mse = nn.MSELoss()
+    # Note!!!!!!!!! Since the input of the MSEloss is a scalar, 
+    # MSELoss(divide by 1) is actually the same as MSELoss(reduction='sum')
+    sq_loss = nn.MSELoss(reduction='sum') 
     optimizer = optim.SGD(net.parameters(), lr=learning_rate)
     optimizer_proj = optim.SGD([w], lr=learning_rate)
     writer = SummaryWriter(log_dir='runs/{}'.format(path))
@@ -133,9 +266,16 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=True, B=1000):
         next_s_t[next_s] = 1
         expected = r + df * net(next_s_t).detach()  # detach the variable from computational graph
 
+        if off_policy == True:
+            pi_t = a / np.sum(range(env.num_actions + 1)) # target policy
+            pi_b = 1 / env.num_actions # behavioral policy
+            p = pi_t / pi_b 
+        else:
+            p = 1
+
         # TD update
         optimizer.zero_grad()
-        loss = mse(net(s), expected)
+        loss = sq_loss(net(s), p * expected)
         loss.backward()
         optimizer.step()
 
@@ -192,9 +332,9 @@ class Net(nn.Module):
         self.br.weight.data.uniform_(-1, 1)
 
 
-def train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=True):
+def train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging, off_policy):
     net = Net(num_states, m)
-    TD_neural(seq_len, df, learning_rate, env, net, averaging)
+    TD_neural(seq_len, df, learning_rate, env, net, averaging=averaging, off_policy=off_policy)
     print("finish")
 
 def V_bellman(env):
@@ -234,17 +374,32 @@ def evaluate(num_states, num_actions, M, df, env, path):
 if __name__ == "__main__":
     np.random.seed(4321)
     torch.manual_seed(4321)
-    epoch=1
-    alpha = 0.0005
+    epoch = 1
+    alpha = 0.0001
     num_states = 500
     num_actions = 5
-    seq_len = 350000
+    seq_len = 400000
     df = 0.9
-    learning_rate = 0.005
-    M = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700]
-    #M = [400, 500]
+    learning_rate = 0.0005
+    M = [*range(50, 601, 50)]
+    #M = [50, 100]
     env = Garnet(num_states, num_actions, b_factor=100)
     """ for m in M:
-        train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=False) """
+        train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=False, off_policy=True)
 
-    evaluate(num_states, num_actions, M, df, env, path="proj")
+    evaluate(num_states, num_actions, M, df, env, path="off_policy") """
+    mse_GTD = []
+    for m in M:
+        mse_GTD.append(GTD_note(epoch, seq_len, df, alpha, env, m, alpha))
+    mse_GTDTDerror = []
+    for m in M:
+        mse_GTDTDerror.append(GTD_TDerror(epoch, seq_len, df, alpha, env, m, alpha))
+    
+    plt.plot(M, mse_GTD, label='note')
+    plt.plot(M, mse_GTDTDerror, label='original td error')
+    plt.title("MSE of the value function")
+    plt.ylabel("Mean Square Error")
+    plt.xlabel("m")
+    plt.legend()
+    plt.savefig("notevsorigin.png")
+    plt.show()     

@@ -388,18 +388,3 @@ if __name__ == "__main__":
         train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=False, off_policy=True)
 
     evaluate(num_states, num_actions, M, df, env, path="off_policy") """
-    mse_GTD = []
-    for m in M:
-        mse_GTD.append(GTD_note(epoch, seq_len, df, alpha, env, m, alpha))
-    mse_GTDTDerror = []
-    for m in M:
-        mse_GTDTDerror.append(GTD_TDerror(epoch, seq_len, df, alpha, env, m, alpha))
-    
-    plt.plot(M, mse_GTD, label='note')
-    plt.plot(M, mse_GTDTDerror, label='original td error')
-    plt.title("MSE of the value function")
-    plt.ylabel("Mean Square Error")
-    plt.xlabel("m")
-    plt.legend()
-    plt.savefig("notevsorigin.png")
-    plt.show()     

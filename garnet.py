@@ -111,21 +111,18 @@ def TD_linear_off_note(epoch, seq_len, df, alpha, env, dim):
     mse_td_linear = []  # mean square error in every epoch
     W = np.random.rand(dim)
     features = np.random.normal(0, 1, (env.num_states, dim)) 
+    pi_b = 1 / env.num_actions # behavioral policy
     
     for _ in range(epoch):
         s = 0
         for t in range(seq_len):
             a = np.random.choice(np.arange(env.num_actions))
             r, next_s = env.step(a)
-            pi_t = a / np.sum(range(env.num_actions + 1)) # target policy
-            pi_b = 1 / env.num_actions # behavioral policy
+            pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
             p = pi_t / pi_b 
             W += alpha * (p * features[s] * (r + df * np.dot(features[next_s].T, W)) 
                 -  features[s] * np.dot(features[s].T, W)) 
             s = next_s
-
-            if t % 9999 == 0:
-                print('progressing')
 
         mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
     return mse_td_linear
@@ -135,22 +132,19 @@ def TD_linear_off_book(epoch, seq_len, df, alpha, env, dim):
     env.state = 0
     mse_td_linear = []  # mean square error in every epoch
     W = np.random.rand(dim)
-    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    features = np.random.normal(0, 1, (env.num_states, dim))
+    pi_b = 1 / env.num_actions # behavioral policy 
     
     for _ in range(epoch):
         s = 0
         for t in range(seq_len):
             a = np.random.choice(np.arange(env.num_actions))
             r, next_s = env.step(a)
-            pi_t = a / np.sum(range(env.num_actions + 1)) # target policy
-            pi_b = 1 / env.num_actions # behavioral policy
+            pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
             p = pi_t / pi_b 
             W += alpha * p * ( features[s] * (r + df * np.dot(features[next_s].T, W)) 
                 -  features[s] * np.dot(features[s].T, W)) 
             s = next_s
-
-            if t % 9999 == 0:
-                print('progressing')
 
         mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
     return mse_td_linear
@@ -267,7 +261,7 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=
         expected = r + df * net(next_s_t).detach()  # detach the variable from computational graph
 
         if off_policy == True:
-            pi_t = a / np.sum(range(env.num_actions + 1)) # target policy
+            pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
             pi_b = 1 / env.num_actions # behavioral policy
             p = pi_t / pi_b 
         else:
@@ -275,7 +269,7 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=
 
         # TD update
         optimizer.zero_grad()
-        loss = sq_loss(net(s), p * expected)
+        loss = p * sq_loss(net(s), expected)
         loss.backward()
         optimizer.step()
 

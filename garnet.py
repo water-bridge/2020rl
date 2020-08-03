@@ -146,6 +146,7 @@ def TD_linear_off_book(epoch, seq_len, df, alpha, env, dim):
                 -  features[s] * np.dot(features[s].T, W)) 
             s = next_s
 
+        print(((V_bel - np.dot(features, W)) ** 2).mean())
         mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
     return mse_td_linear
 
@@ -190,10 +191,10 @@ def GTD_note(epoch, seq_len, df, alpha, env, dim, beta):
             r, next_s = env.step(a)
             pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
             p = pi_t / pi_b
-            W += + beta * (features[s] * np.dot(features[s].T, theta) - W
-                - features[s] * (df * np.dot(features[next_s].T, theta) + r))
+            W += beta * (features[s] * np.dot(features[s].T, theta) - W
+                - p * features[s] * (df * np.dot(features[next_s].T, theta) + r))
             theta -= alpha * (features[s] * np.dot(features[s].T, W) 
-                - df * features[next_s] * np.dot(features[s].T, W))
+                - p * df * features[next_s] * np.dot(features[s].T, W))
             s = next_s
         print(((V_bel - np.dot(features, theta)) ** 2).mean())
         mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
@@ -215,10 +216,9 @@ def GTD0(epoch, seq_len, df, alpha, env, dim, beta):
             r, next_s = env.step(a)
             pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
             p = pi_t / pi_b
-            W += + beta * (features[s] * (r + df * np.dot(features[next_s].T, theta)) 
-                - features[s] * np.dot(features[s].T, theta) - W)
-            theta -= alpha * (df * features[next_s] * np.dot(features[s].T, W) 
-                - features[s] * np.dot(features[s].T, W))
+            TD_error = r + df * np.dot(features[next_s].T, theta) - np.dot(features[s].T, theta)
+            W += beta * p * (TD_error * features[s] - W)
+            theta += alpha * p * (features[s] - df * features[next_s]) * np.dot(features[s].T, W)
             s = next_s
         print(((V_bel - np.dot(features, theta)) ** 2).mean())
         mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
@@ -370,15 +370,37 @@ if __name__ == "__main__":
     torch.manual_seed(4321)
     epoch = 1
     alpha = 0.0001
+    beta = alpha
     num_states = 500
     num_actions = 5
     seq_len = 400000
     df = 0.9
-    learning_rate = 0.0005
-    M = [*range(50, 601, 50)]
+    learning_rate = 0.005
+    M = [*range(50, 551, 50)]
     #M = [50, 100]
     env = Garnet(num_states, num_actions, b_factor=100)
     """ for m in M:
         train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=False, off_policy=True)
 
     evaluate(num_states, num_actions, M, df, env, path="off_policy") """
+    mse_td = []
+    mse_td_linear = []
+    mse_td_linear_off = []
+    mse_TDC = []
+    mse_GTD = []
+    for m in  M:
+        mse_td_linear.append(TD_linear(epoch, seq_len, df, alpha, env, m))
+        mse_td_linear_off.append(TD_linear_off_book(epoch, seq_len, df, alpha, env, m))
+        mse_TDC.append(TDC(epoch, seq_len, df, alpha, env, m, beta))
+        mse_GTD.append(GTD0(epoch, seq_len, df, 0.0002, env, m, 0.00001))
+
+    plt.plot(M, mse_td_linear, label='TD_linear')
+    plt.plot(M, mse_td_linear_off, label='TD_linear(off policy)')
+    plt.plot(M, mse_TDC, label='TDC(off policy)')
+    plt.plot(M, mse_GTD, label='GTD0(off policy)')
+    plt.title("MSE of the value function")
+    plt.ylabel("Mean Square Error")
+    plt.xlabel("m")
+    plt.legend()
+    plt.savefig("tdtd.png")
+    plt.show() 

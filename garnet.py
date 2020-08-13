@@ -379,7 +379,7 @@ def GTD_neural(seq_len, df, learning_rate, env, num_states, m, v=0.01, B=1000):
         loss.backward()
         optimizer_primal.step()
         optimizer_dual.step()
-        learning_rate = 500 / (1000 +(i + 1))
+        learning_rate = 100 / (1000 +(i + 1))
         optimizer_primal = scheduler(optimizer_primal,learning_rate)
         optimizer_dual = scheduler(optimizer_dual,learning_rate)
 

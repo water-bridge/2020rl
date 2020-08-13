@@ -7,6 +7,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from torch.utils.tensorboard import SummaryWriter
+from torch.optim.lr_scheduler import StepLR
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Garnet:
     def __init__(self, num_states=10, num_actions=5, b_factor=2):
@@ -22,6 +25,23 @@ class Garnet:
             cumulative = np.concatenate(([0], np.sort(np.random.rand(b_factor - 1)), [1]), axis=0)
             for k in range(b_factor):
                 self.P[s, a, possible_states[k]] += cumulative[k + 1] - cumulative[k]
+
+    def stationary(self):
+        Q = np.sum(self.P, axis=1)/5
+
+        evals, evecs = np.linalg.eig(Q.T)
+        evec1 = evecs[:,np.isclose(evals, 1)]
+
+        #Since np.isclose will return an array, we've indexed with an array
+        #so we still have our 2nd axis.  Get rid of it, since it's only size 1.
+        evec1 = evec1[:,0]
+
+        stationary = evec1 / evec1.sum()
+
+        #eigs finds complex eigenvalues and eigenvectors, so you'll want the real part.
+        stationary = stationary.real
+        return stationary
+
 
     def step(self, action):
         # feedback of the env when the agent makes an action
@@ -71,6 +91,8 @@ def monte_carlo(epoch, seq_len, df, env, V_bel):
 
 def TD(epoch, seq_len, df, alpha, env):
     V_bel = V_bellman(env)
+    pi = env.stationary()
+
     env.state = 0
     mse_td = []  # mean square error in every epoch
     V_td = np.random.rand(env.num_states)  # initialize the V(s) randomly
@@ -87,30 +109,36 @@ def TD(epoch, seq_len, df, alpha, env):
 
 def TD_linear(epoch, seq_len, df, alpha, env, dim):
     V_bel = V_bellman(env)
+    pi = env.stationary()
+
     env.state = 0
-    mse_td_linear = []  # mean square error in every epoch
+    msbe = []  # mean square error in every epoch
     W = np.random.rand(dim)
-    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    features = np.random.normal(1, 1, (env.num_states, dim)) 
     
     for _ in range(epoch):
         s = 0
         for t in range(seq_len):
             a = np.random.choice(np.arange(env.num_actions))
             r, next_s = env.step(a)
-            grad = (r + df * np.dot(features[next_s].T, W) - np.dot(features[s].T, W)) * features[s]
+            grad = (r + df * np.dot(features[next_s], W) - np.dot(features[s], W)) * features[s]
             # grad = np.clip(grad, -1000000000000000000, 1000000000000000000)
             W += alpha * grad     
             s = next_s
-        mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
-    return mse_td_linear
+        print(np.squeeze(((V_bel - np.dot(features, W)) ** 2)).mean())
+        msbe.append(np.sum(pi * ((V_bel - np.dot(features, W)) ** 2)))
+        #mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
+    return msbe
 
 
 def TD_linear_off_note(epoch, seq_len, df, alpha, env, dim):
     V_bel = V_bellman(env)
+    pi = env.stationary()
+
     env.state = 0
     mse_td_linear = []  # mean square error in every epoch
     W = np.random.rand(dim)
-    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    features = np.random.normal(1, 1, (env.num_states, dim)) 
     pi_b = 1 / env.num_actions # behavioral policy
     
     for _ in range(epoch):
@@ -129,10 +157,12 @@ def TD_linear_off_note(epoch, seq_len, df, alpha, env, dim):
 
 def TD_linear_off_book(epoch, seq_len, df, alpha, env, dim):
     V_bel = V_bellman(env)
+    pi = env.stationary()
+
     env.state = 0
-    mse_td_linear = []  # mean square error in every epoch
+    msbe = []  # mean square error in every epoch
     W = np.random.rand(dim)
-    features = np.random.normal(0, 1, (env.num_states, dim))
+    features = np.random.normal(1, 1, (env.num_states, dim)) 
     pi_b = 1 / env.num_actions # behavioral policy 
     
     for _ in range(epoch):
@@ -147,17 +177,20 @@ def TD_linear_off_book(epoch, seq_len, df, alpha, env, dim):
             s = next_s
 
         print(((V_bel - np.dot(features, W)) ** 2).mean())
-        mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
-    return mse_td_linear
+        msbe.append(np.sum(pi * ((V_bel - np.dot(features, W)) ** 2)))
+        #mse_td_linear.append(((V_bel - np.dot(features, W)) ** 2).mean())  # MSE
+    return msbe
 
 def TDC(epoch, seq_len, df, alpha, env, dim, beta):
     # TD with gradient correction
     V_bel = V_bellman(env)
+    pi = env.stationary()
+
     env.state = 0
-    mse_td_linear = []  # mean square error in every epoch
+    msbe = []  # mean square error in every epoch
     theta = np.random.rand(dim)
     W = np.random.rand(dim)
-    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    features = np.random.normal(1, 1, (env.num_states, dim)) 
     pi_b = 1 / env.num_actions # behavioral policy
     
     for _ in range(epoch):
@@ -172,16 +205,19 @@ def TDC(epoch, seq_len, df, alpha, env, dim, beta):
             W += beta * p * (TD_error - np.dot(features[s].T, W)) * features[s]
             s = next_s
         print(((V_bel - np.dot(features, theta)) ** 2).mean())
-        mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
-    return mse_td_linear
+        msbe.append(np.sum(pi * ((V_bel - np.dot(features, theta)) ** 2)))
+        #mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
+    return msbe
 
 def GTD_note(epoch, seq_len, df, alpha, env, dim, beta):
     V_bel = V_bellman(env)
+    pi = env.stationary()
+
     env.state = 0
     mse_td_linear = []  # mean square error in every epoch
     theta = np.random.rand(dim)
     W = np.random.rand(dim)
-    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    features = np.random.normal(1, 1, (env.num_states, dim)) 
     pi_b = 1 / env.num_actions # behavioral policy
     
     for _ in range(epoch):
@@ -202,11 +238,13 @@ def GTD_note(epoch, seq_len, df, alpha, env, dim, beta):
 
 def GTD0(epoch, seq_len, df, alpha, env, dim, beta):
     V_bel = V_bellman(env)
+    pi = env.stationary()
+
     env.state = 0
-    mse_td_linear = []  # mean square error in every epoch
+    msbe = []  # mean square error in every epoch
     theta = np.random.rand(dim)
     W = np.random.rand(dim)
-    features = np.random.normal(0, 1, (env.num_states, dim)) 
+    features = np.random.normal(1, 1, (env.num_states, dim)) 
     pi_b = 1 / env.num_actions # behavioral policy
     
     for _ in range(epoch):
@@ -221,8 +259,9 @@ def GTD0(epoch, seq_len, df, alpha, env, dim, beta):
             theta += alpha * p * (features[s] - df * features[next_s]) * np.dot(features[s].T, W)
             s = next_s
         print(((V_bel - np.dot(features, theta)) ** 2).mean())
-        mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
-    return mse_td_linear
+        msbe.append(np.sum(pi * ((V_bel - np.dot(features, theta)) ** 2)))
+        #mse_td_linear.append(((V_bel - np.dot(features, theta)) ** 2).mean())  # MSE
+    return msbe
 
 def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=False, B=1000):
     # only one epoch
@@ -241,7 +280,6 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=
     # initialize parameters
     s = torch.zeros(env.num_states)
     s[0] = 1
-    w = nn.Parameter(torch.rand(net.m, net.dim)) 
     w_ = net.w0.detach().clone()  # barW for averaging
 
     # initialize optimizer and logger
@@ -249,7 +287,6 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=
     # MSELoss(divide by 1) is actually the same as MSELoss(reduction='sum')
     sq_loss = nn.MSELoss(reduction='sum') 
     optimizer = optim.SGD(net.parameters(), lr=learning_rate)
-    optimizer_proj = optim.SGD([w], lr=learning_rate)
     writer = SummaryWriter(log_dir='runs/{}'.format(path))
     
     for i in range(seq_len):
@@ -257,8 +294,10 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=
         a = np.random.choice(np.arange(env.num_actions))
         r, next_s = env.step(a)
         next_s_t = torch.zeros(env.num_states)
+        next_s_t = next_s_t.to(device)
         next_s_t[next_s] = 1
         expected = r + df * net(next_s_t).detach()  # detach the variable from computational graph
+        expected = expected.to(device)
 
         if off_policy == True:
             pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
@@ -273,18 +312,8 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=
         loss.backward()
         optimizer.step()
 
-        for _ in range(10000):
-            # minimize ||W-bar/W(t+1)||
-            optimizer_proj.zero_grad()
-            loss_proj = torch.norm(w - net.wr.weight.data.detach(), p="fro")
-            loss_proj.backward()
-            optimizer_proj.step()
-            if loss_proj <= 0.001:
-                break
-
         # projection 
-        w.clamp(max=B)
-        net.wr.weight.data = w.data.detach()  # data attribute does not affect the computational graph
+        net.wr.weight.clamp(min=-B,max=B)  
 
         # averaging
         if averaging:
@@ -303,6 +332,72 @@ def TD_neural(seq_len, df, learning_rate, env, net, averaging=False, off_policy=
     if averaging:
         net.wr.weight.data = w_.data
     torch.save(net.state_dict(), "weights/m({})={}".format(path, net.m))
+    writer.close()
+
+def GTD_neural(seq_len, df, learning_rate, env, num_states, m, v=0.01, B=1000):
+    # only one epoch
+    env.state = 0
+    running_loss = 0
+    # initialize saving path
+    path = "GTD"
+
+    # initialize parameters
+    primal_net = Net(num_states, m).to(device)
+    dual_net = Net(num_states, m).to(device)
+    pi_b = 1 / env.num_actions # behavioral policy
+    s = torch.zeros(env.num_states)
+    s[0] = 1
+
+    # initialize optimizer and logger
+    optimizer_primal = optim.SGD(primal_net.parameters(), lr=learning_rate)
+    optimizer_dual = optim.SGD(dual_net.parameters(), lr=learning_rate)
+    writer = SummaryWriter(log_dir='runs/{}'.format(path))
+    
+    for i in range(seq_len):
+        # sample (s, a, r, s')
+        a = np.random.choice(np.arange(env.num_actions))
+        r, next_s = env.step(a)
+        next_s_t = torch.zeros(env.num_states).to(device)
+        next_s_t[next_s] = 1
+
+        #p ratio
+        pi_t = a + 1 / np.sum(range(env.num_actions + 1)) # target policy
+        p = pi_t / pi_b 
+       
+        #p * td_error
+        delta = p * (primal_net(s) - df * primal_net(next_s_t) - r)
+        #primal loss
+        loss_primal = dual_net(s).detach() * delta - 0.5 * dual_net(s).detach()  ** 2 + 0.5 * v * primal_net(s) ** 2
+      
+        #dual loss
+        loss_dual = dual_net(s) * delta.detach() - 0.5 * dual_net(s) ** 2 + 0.5 * v * primal_net(s).detach() ** 2
+
+        # update
+        optimizer_primal.zero_grad()
+        optimizer_dual.zero_grad()
+        loss = loss_primal - loss_dual
+        loss.backward()
+        optimizer_primal.step()
+        optimizer_dual.step()
+        learning_rate = 500 / (1000 +(i + 1))
+        optimizer_primal = scheduler(optimizer_primal,learning_rate)
+        optimizer_dual = scheduler(optimizer_dual,learning_rate)
+
+        # projection 
+        primal_net.wr.weight.clamp(min=-B,max=B)
+        dual_net.wr.weight.clamp(min=-B,max=B)
+      
+        s = next_s_t
+
+        # record trainnig loss  
+        running_loss += loss_primal.item()
+        if i % 1000 == 999:
+            # ...log the running loss
+            print("loss:", running_loss / 1000, " seq:", i + 1)
+            writer.add_scalar('training loss with {}(m = {})'.format(path, primal_net.m), running_loss / 1000, i + 1)
+            running_loss = 0.0
+
+    torch.save(primal_net.state_dict(), "weights/m({})={}".format(path, primal_net.m))
     writer.close()
 
 
@@ -325,9 +420,13 @@ class Net(nn.Module):
         self.wr.weight.data.normal_(0.0, 1 / self.dim)
         self.br.weight.data.uniform_(-1, 1)
 
+def scheduler(optimizer,lr):    
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return optimizer
 
 def train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging, off_policy):
-    net = Net(num_states, m)
+    net = Net(num_states, m).to(device)
     TD_neural(seq_len, df, learning_rate, env, net, averaging=averaging, off_policy=off_policy)
     print("finish")
 
@@ -341,7 +440,8 @@ def V_bellman(env):
 def evaluate(num_states, num_actions, M, df, env, path):
     # V(s) of bellman equation
     V_bel = V_bellman(env)
-
+    pi = env.stationary()
+    
     mse = []
     mse_linear = []
     for m in M:
@@ -355,34 +455,65 @@ def evaluate(num_states, num_actions, M, df, env, path):
             V_neural = net(all_s).squeeze().numpy()
         
         assert V_bel.shape == V_neural.shape
-        mse.append(((V_bel - V_neural) ** 2).mean())
+        mse.append(np.sum(pi * ((V_bel - V_neural) ** 2)))
         #mse_linear.append(TD_linear(epoch, seq_len, df, alpha, env, m))
-
+    print(mse)
     plt.plot(M, mse, label='Neural')
     #plt.plot(M, mse_linear, label='Linear')
-    plt.title("MSE of the value function")
+    plt.title("MSBE of the value function")
     plt.ylabel("Mean Square Error")
     plt.xlabel("m")
+    plt.savefig("neural.png")
+    plt.show() 
+
+def evaluate2(num_states, num_actions, M, df, env, path, path2):
+    # V(s) of bellman equation
+    V_bel = V_bellman(env)
+    pi = env.stationary()
+    
+    msbe = []
+    msbe2 = []
+    for m in M:
+        # load weights
+        net = Net(num_states, m)
+        net.load_state_dict(torch.load("weights/m({})={}".format(path, m)))
+        net2 = Net(num_states, m)
+        net2.load_state_dict(torch.load("weights/m({})={}".format(path2, m)))
+        with torch.no_grad():
+            all_s = torch.zeros(num_states, num_states)
+            for i in range(num_states):
+                all_s[i][i] = 1
+            V_neural = net(all_s).squeeze().numpy()
+            V_neural2 = net2(all_s).squeeze().numpy()
+        
+        assert V_bel.shape == V_neural.shape
+        msbe.append(np.sum(pi * ((V_bel - V_neural) ** 2)))
+        msbe2.append(np.sum(pi * ((V_bel - V_neural2) ** 2)))
+    print(msbe)
+    plt.plot(M, msbe, label='neural GTD')
+    plt.plot(M, msbe2, label='neural TD')
+    plt.title("MSBE of the value function")
+    plt.ylabel("Mean Square Bellman Error")
+    plt.xlabel("m")
+    plt.legend()
+    plt.savefig("neural.png")
     plt.show() 
 
 if __name__ == "__main__":
     np.random.seed(4321)
     torch.manual_seed(4321)
     epoch = 1
-    alpha = 0.0001
+    alpha = 0.00005
     beta = alpha
     num_states = 500
     num_actions = 5
-    seq_len = 400000
+    seq_len = 300000
     df = 0.9
-    learning_rate = 0.005
-    M = [*range(50, 551, 50)]
-    #M = [50, 100]
+    learning_rate = 0.05
+    #M = [*range(10, 46, 10)]
+    M = [*range(50, 501, 50)]
+    #M = [400]
     env = Garnet(num_states, num_actions, b_factor=100)
-    """ for m in M:
-        train(num_states, num_actions, seq_len, df, learning_rate, m, env, averaging=False, off_policy=True)
-
-    evaluate(num_states, num_actions, M, df, env, path="off_policy") """
     mse_td = []
     mse_td_linear = []
     mse_td_linear_off = []
@@ -392,14 +523,14 @@ if __name__ == "__main__":
         mse_td_linear.append(TD_linear(epoch, seq_len, df, alpha, env, m))
         mse_td_linear_off.append(TD_linear_off_book(epoch, seq_len, df, alpha, env, m))
         mse_TDC.append(TDC(epoch, seq_len, df, alpha, env, m, beta))
-        mse_GTD.append(GTD0(epoch, seq_len, df, 0.0002, env, m, 0.00001))
+        mse_GTD.append(GTD0(epoch, seq_len, df, 0.0000002, env, m, 0.001))
 
     plt.plot(M, mse_td_linear, label='TD_linear')
     plt.plot(M, mse_td_linear_off, label='TD_linear(off policy)')
     plt.plot(M, mse_TDC, label='TDC(off policy)')
     plt.plot(M, mse_GTD, label='GTD0(off policy)')
-    plt.title("MSE of the value function")
-    plt.ylabel("Mean Square Error")
+    plt.title("MSBE of the value function")
+    plt.ylabel("Mean Square Bellman Error")
     plt.xlabel("m")
     plt.legend()
     plt.savefig("tdtd.png")

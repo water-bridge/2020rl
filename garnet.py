@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Garnet:
     def __init__(self, num_states=10, num_actions=5, b_factor=2):

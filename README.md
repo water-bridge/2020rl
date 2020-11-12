@@ -1,2 +1,2 @@
-### For more details click here [Final Report](report.pdf)
+### Click here for more details [Final Report](report.pdf)
 
